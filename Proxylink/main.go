@@ -212,6 +212,7 @@ func writeMultipleFiles(profiles []*model.ProfileItem) error {
 	}
 
 	ext := getFileExtension()
+	usedNames := make(map[string]int) // 跟踪已使用的文件名，避免重名覆盖
 
 	for i, profile := range profiles {
 		output, err := formatSingleProfile(profile)
@@ -221,9 +222,16 @@ func writeMultipleFiles(profiles []*model.ProfileItem) error {
 		}
 
 		// 生成文件名
-		filename := sanitizeFilename(profile.Remarks)
-		if filename == "" {
-			filename = fmt.Sprintf("node_%d", i+1)
+		baseName := sanitizeFilename(profile.Remarks)
+		if baseName == "" {
+			baseName = fmt.Sprintf("node_%d", i+1)
+		}
+
+		// 重名检测: 相同名称追加序号
+		usedNames[baseName]++
+		filename := baseName
+		if usedNames[baseName] > 1 {
+			filename = fmt.Sprintf("%s_%d", baseName, usedNames[baseName])
 		}
 		filename = filename + ext
 
