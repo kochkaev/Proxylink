@@ -21,7 +21,7 @@ var (
 	parseFile    = flag.String("file", "", "从文件批量解析")
 	parseXray    = flag.String("xray", "", "从 Xray JSON 配置文件解析")
 	subURL       = flag.String("sub", "", "订阅 URL")
-	outputFormat = flag.String("format", "json", "输出格式: json, xray, uri")
+	outputFormat = flag.String("format", "json", "输出格式: json, xray, singbox, uri")
 	outputFile   = flag.String("o", "", "输出到文件 (单文件模式)")
 	outputDir    = flag.String("dir", "", "输出目录 (多文件模式，每个节点单独一个文件)")
 	autoName     = flag.Bool("auto", false, "自动使用 remarks 作为文件名")
@@ -322,6 +322,8 @@ func formatSingleProfile(profile *model.ProfileItem) (string, error) {
 	case "xray":
 		config := generator.GenerateXrayConfig(profile)
 		return toJSON(config)
+	case "singbox":
+		return generator.GenerateSingboxOutbound(profile)
 	case "uri":
 		return encoder.ToURI(profile), nil
 	default:
@@ -338,6 +340,8 @@ func formatProfiles(profiles []*model.ProfileItem) (string, error) {
 		}
 		config := &generator.XrayConfig{Outbounds: outbounds}
 		return toJSON(config)
+	case "singbox":
+		return generator.GenerateSingboxOutbounds(profiles)
 	case "uri":
 		uris := encoder.ToURIBatch(profiles)
 		return strings.Join(uris, "\n"), nil
