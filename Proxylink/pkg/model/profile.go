@@ -30,6 +30,7 @@ type ProfileItem struct {
 	Authority    string `json:"authority,omitempty"`    // gRPC authority
 	XhttpMode    string `json:"xhttpMode,omitempty"`    // XHTTP 模式
 	XhttpExtra   string `json:"xhttpExtra,omitempty"`   // XHTTP 额外配置
+	FinalMask    string `json:"finalMask,omitempty"`    // finalmask JSON (fm 参数)
 
 	// TLS 配置
 	Security      string `json:"security,omitempty"`      // tls/reality/none

@@ -26,6 +26,7 @@ func parseQueryParams(config *model.ProfileItem, query url.Values) {
 	config.Authority = query.Get("authority")
 	config.XhttpMode = query.Get("mode")
 	config.XhttpExtra = query.Get("extra")
+	config.FinalMask = query.Get("fm")
 
 	// TLS
 	config.Security = query.Get("security")
@@ -38,6 +39,8 @@ func parseQueryParams(config *model.ProfileItem, query url.Values) {
 	config.Fingerprint = query.Get("fp")
 	config.Flow = query.Get("flow")
 	config.Mldsa65Verify = query.Get("pqv")
+	config.EchConfigList = query.Get("ech")
+	config.PinnedCA256 = query.Get("pcs")
 
 	// Insecure - 支持多种参数名
 	insecure := query.Get("insecure")
@@ -83,11 +86,13 @@ func buildQueryParams(config *model.ProfileItem) url.Values {
 		query.Set("pqv", config.Mldsa65Verify)
 	}
 
-	// Insecure
+	// Insecure - 双键输出 (兼容 v2rayNG)
 	if config.Security == "tls" {
 		if config.Insecure {
+			query.Set("insecure", "1")
 			query.Set("allowInsecure", "1")
 		} else {
+			query.Set("insecure", "0")
 			query.Set("allowInsecure", "0")
 		}
 	}
@@ -101,6 +106,15 @@ func buildQueryParams(config *model.ProfileItem) url.Values {
 	}
 	if config.SpiderX != "" {
 		query.Set("spx", config.SpiderX)
+	}
+	if config.EchConfigList != "" {
+		query.Set("ech", config.EchConfigList)
+	}
+	if config.PinnedCA256 != "" {
+		query.Set("pcs", config.PinnedCA256)
+	}
+	if config.FinalMask != "" {
+		query.Set("fm", config.FinalMask)
 	}
 
 	// 传输层

@@ -184,22 +184,27 @@ type MuxBean struct {
 
 // Hysteria 配置 (Xray Hysteria2)
 type HysteriaSettingsBean struct {
-	Version int             `json:"version"`
-	Auth    string          `json:"auth,omitempty"`
-	Up      string          `json:"up,omitempty"`
-	Down    string          `json:"down,omitempty"`
-	Udphop  *HysteriaUdphop `json:"udphop,omitempty"`
+	Version int    `json:"version"`
+	Auth    string `json:"auth,omitempty"`
 }
 
-type HysteriaUdphop struct {
-	Port     string `json:"port,omitempty"`
-	Interval int    `json:"interval,omitempty"`
-}
-
-// FinalMaskBean Hysteria 混淆配置 (替代旧的 udpmasks)
+// FinalMaskBean finalmask 配置 (用于 KCP / Hysteria2 等)
 type FinalMaskBean struct {
-	Tcp []MaskBean `json:"tcp,omitempty"`
-	Udp []MaskBean `json:"udp,omitempty"`
+	Tcp        []MaskBean       `json:"tcp,omitempty"`
+	Udp        []MaskBean       `json:"udp,omitempty"`
+	QuicParams *QuicParamsBean  `json:"quicParams,omitempty"`
+}
+
+type QuicParamsBean struct {
+	Congestion string       `json:"congestion,omitempty"`
+	BrutalUp   string       `json:"brutalUp,omitempty"`
+	BrutalDown string       `json:"brutalDown,omitempty"`
+	UdpHop     *UdpHopBean  `json:"udpHop,omitempty"`
+}
+
+type UdpHopBean struct {
+	Ports    string `json:"ports,omitempty"`
+	Interval string `json:"interval,omitempty"`
 }
 
 type MaskBean struct {
@@ -453,19 +458,49 @@ func generateHysteria2Outbound(p *model.ProfileItem) *XrayOutbound {
 		Auth:    p.Password,
 	}
 
+	// 构建 finalmask (quicParams + obfs)
+	quicParams := &QuicParamsBean{}
+
+	// 带宽
+	if p.BandwidthUp != "" || p.BandwidthDown != "" {
+		if p.BandwidthUp != "" {
+			quicParams.BrutalUp = p.BandwidthUp
+		}
+		if p.BandwidthDown != "" {
+			quicParams.BrutalDown = p.BandwidthDown
+		}
+		quicParams.Congestion = "brutal"
+	}
+
 	// 端口跳跃
 	if p.PortHopping != "" {
-		interval := 30
+		interval := "30"
 		if p.PortHoppingInterval != "" {
-			if v, err := strconv.Atoi(p.PortHoppingInterval); err == nil {
-				interval = v
+			if v, err := strconv.Atoi(p.PortHoppingInterval); err == nil && v >= 5 {
+				interval = p.PortHoppingInterval
 			}
 		}
-		ss.HysteriaSettings.Udphop = &HysteriaUdphop{
-			Port:     p.PortHopping,
+		quicParams.UdpHop = &UdpHopBean{
+			Ports:    p.PortHopping,
 			Interval: interval,
 		}
 	}
+
+	finalmask := &FinalMaskBean{
+		QuicParams: quicParams,
+	}
+
+	// obfs (salamander)
+	if p.ObfsPassword != "" {
+		finalmask.Udp = []MaskBean{{
+			Type: "salamander",
+			Settings: &MaskSettingsBean{
+				Password: p.ObfsPassword,
+			},
+		}}
+	}
+
+	ss.Finalmask = finalmask
 
 	// TLS 配置
 	sni := p.SNI
@@ -482,18 +517,6 @@ func generateHysteria2Outbound(p *model.ProfileItem) *XrayOutbound {
 	}
 	if p.Fingerprint != "" {
 		ss.TlsSettings.Fingerprint = p.Fingerprint
-	}
-
-	// obfs (salamander) -> finalmask
-	if p.ObfsPassword != "" {
-		ss.Finalmask = &FinalMaskBean{
-			Udp: []MaskBean{{
-				Type: "salamander",
-				Settings: &MaskSettingsBean{
-					Password: p.ObfsPassword,
-				},
-			}},
-		}
 	}
 
 	return &XrayOutbound{
@@ -561,28 +584,30 @@ func populateTransportSettings(ss *StreamSettings, p *model.ProfileItem) string 
 		ss.TcpSettings = tcpSetting
 
 	case "kcp":
-		kcpSetting := &KcpSettingsBean{
-			Mtu:              1350,
-			Tti:              50,
-			UplinkCapacity:   12,
-			DownlinkCapacity: 100,
-			Congestion:       false,
-			ReadBufferSize:   1,
-			WriteBufferSize:  1,
-			Header: &KcpHeaderBean{
-				Type: p.HeaderType,
-			},
+		ss.KcpSettings = &KcpSettingsBean{}
+		udpMaskList := []MaskBean{}
+		if p.HeaderType != "" && p.HeaderType != "none" {
+			kcpHeaderType := p.HeaderType
+			if kcpHeaderType == "wechat-video" {
+				kcpHeaderType = "header-wechat"
+			} else {
+				kcpHeaderType = "header-" + kcpHeaderType
+			}
+			mask := MaskBean{Type: kcpHeaderType}
+			if p.HeaderType == "dns" && p.Host != "" {
+				mask.Settings = &MaskSettingsBean{Domain: p.Host}
+			}
+			udpMaskList = append(udpMaskList, mask)
 		}
-		if p.HeaderType == "" {
-			kcpSetting.Header.Type = "none"
+		if p.Seed == "" {
+			udpMaskList = append(udpMaskList, MaskBean{Type: "mkcp-original"})
+		} else {
+			udpMaskList = append(udpMaskList, MaskBean{
+				Type:     "mkcp-aes128gcm",
+				Settings: &MaskSettingsBean{Password: p.Seed},
+			})
 		}
-		if p.Seed != "" {
-			kcpSetting.Seed = p.Seed
-		}
-		if p.Host != "" {
-			kcpSetting.Header.Domain = p.Host
-		}
-		ss.KcpSettings = kcpSetting
+		ss.Finalmask = &FinalMaskBean{Udp: udpMaskList}
 
 	case "ws":
 		wsSetting := &WsSettingsBean{
@@ -656,6 +681,18 @@ func populateTransportSettings(ss *StreamSettings, p *model.ProfileItem) string 
 		}
 		sni = p.Authority
 		ss.GrpcSettings = grpcSetting
+	}
+
+	// FinalMask JSON 覆盖: 如果 ProfileItem 中有显式 fm 参数，用它覆盖自动生成的 finalmask
+	if p.FinalMask != "" {
+		var parsedFM interface{}
+		if err := json.Unmarshal([]byte(p.FinalMask), &parsedFM); err == nil {
+			// 直接用原始 JSON 覆盖
+			var fm FinalMaskBean
+			if err2 := json.Unmarshal([]byte(p.FinalMask), &fm); err2 == nil {
+				ss.Finalmask = &fm
+			}
+		}
 	}
 
 	return sni
